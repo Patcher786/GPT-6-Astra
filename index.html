@@ -738,6 +738,113 @@
       height: 20px;
     }
 
+    /* Attachment preview */
+    .attach-preview {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 14px 0;
+    }
+
+    .attach-preview.has-files {
+      display: flex;
+    }
+
+    .attach-thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      flex-shrink: 0;
+    }
+
+    .attach-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .attach-thumb .file-icon {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      color: var(--text-secondary);
+      font-size: 10px;
+      padding: 4px;
+      text-align: center;
+      word-break: break-all;
+    }
+
+    .attach-thumb .file-icon svg {
+      width: 22px;
+      height: 22px;
+      opacity: 0.8;
+    }
+
+    .attach-thumb .remove-attach {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.7);
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      line-height: 1;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .attach-thumb:hover .remove-attach {
+      opacity: 1;
+    }
+
+    .message-media {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .message-media img {
+      max-width: 220px;
+      max-height: 180px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      object-fit: cover;
+    }
+
+    .message-media .file-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .message-media .file-chip svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
     textarea {
       flex: 1;
       background: transparent;
@@ -1078,8 +1185,10 @@
 
       <div class="input-area">
         <div class="input-wrapper">
+          <div class="attach-preview" id="attachPreview"></div>
           <div class="input-row">
-            <button class="attach-btn" title="Attach file (coming soon)" disabled style="opacity:0.4;cursor:not-allowed;">
+            <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.txt,.md,.csv,.json,.doc,.docx" multiple hidden />
+            <button class="attach-btn" id="attachBtn" title="Attach image or file">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
@@ -1093,7 +1202,7 @@
           </div>
         </div>
         <div class="input-footer">
-          <span>GPT-6 Astra can make mistakes. Verify important information. Powered by Puter.js</span>
+          <span>GPT-6 Astra can make mistakes. Verify important information. Powered by Puter.js · Attach images &amp; files</span>
         </div>
       </div>
     </main>
@@ -1105,10 +1214,11 @@
   <script>
     // ========== State ==========
     let currentModel = 'openai/gpt-6-astra';
-    let messages = []; // {role, content}
+    let messages = []; // {role, content, media?}
     let isGenerating = false;
     let chatId = generateId();
     let chatHistory = JSON.parse(localStorage.getItem('astra_chats') || '[]');
+    let pendingFiles = []; // {file: File, previewUrl: string, isImage: boolean}
 
     // ========== DOM ==========
     const sidebar = document.getElementById('sidebar');
@@ -1126,6 +1236,9 @@
     const modelDropdown = document.getElementById('modelDropdown');
     const currentModelLabel = document.getElementById('currentModelLabel');
     const toast = document.getElementById('toast');
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
+    const attachPreview = document.getElementById('attachPreview');
 
     // ========== Init ==========
     renderHistory();
@@ -1137,16 +1250,49 @@
     newChatBtn.addEventListener('click', startNewChat);
     clearBtn.addEventListener('click', clearConversation);
     sendBtn.addEventListener('click', sendMessage);
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleFileSelect);
 
     userInput.addEventListener('input', () => {
       autoResizeTextarea();
-      sendBtn.disabled = !userInput.value.trim() || isGenerating;
+      updateSendButton();
     });
 
     userInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (!sendBtn.disabled) sendMessage();
+      }
+    });
+
+    // Paste images from clipboard
+    userInput.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) addPendingFile(file);
+        }
+      }
+    });
+
+    // Drag & drop
+    const inputWrapper = document.querySelector('.input-wrapper');
+    inputWrapper.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      inputWrapper.style.borderColor = 'var(--accent)';
+    });
+    inputWrapper.addEventListener('dragleave', () => {
+      inputWrapper.style.borderColor = '';
+    });
+    inputWrapper.addEventListener('drop', (e) => {
+      e.preventDefault();
+      inputWrapper.style.borderColor = '';
+      const files = e.dataTransfer?.files;
+      if (files) {
+        Array.from(files).forEach(f => addPendingFile(f));
       }
     });
 
@@ -1204,10 +1350,92 @@
       userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
     }
 
+    function updateSendButton() {
+      const hasText = userInput.value.trim().length > 0;
+      const hasFiles = pendingFiles.length > 0;
+      sendBtn.disabled = (!hasText && !hasFiles) || isGenerating;
+    }
+
     function showToast(msg) {
       toast.textContent = msg;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function handleFileSelect(e) {
+      const files = e.target.files;
+      if (!files) return;
+      Array.from(files).forEach(f => addPendingFile(f));
+      fileInput.value = '';
+    }
+
+    function addPendingFile(file) {
+      // Limit: max 5 files, max 20MB each
+      if (pendingFiles.length >= 5) {
+        showToast('Max 5 files per message');
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        showToast('File too large (max 20MB)');
+        return;
+      }
+      const isImage = file.type.startsWith('image/');
+      const isVideo = file.type.startsWith('video/');
+      let previewUrl = null;
+      if (isImage || isVideo) {
+        previewUrl = URL.createObjectURL(file);
+      }
+      pendingFiles.push({ file, previewUrl, isImage, isVideo, name: file.name });
+      renderAttachPreview();
+      updateSendButton();
+    }
+
+    function removePendingFile(index) {
+      const item = pendingFiles[index];
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      pendingFiles.splice(index, 1);
+      renderAttachPreview();
+      updateSendButton();
+    }
+
+    function clearPendingFiles() {
+      pendingFiles.forEach(p => {
+        if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      });
+      pendingFiles = [];
+      renderAttachPreview();
+    }
+
+    function renderAttachPreview() {
+      attachPreview.innerHTML = '';
+      if (pendingFiles.length === 0) {
+        attachPreview.classList.remove('has-files');
+        return;
+      }
+      attachPreview.classList.add('has-files');
+      pendingFiles.forEach((item, i) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'attach-thumb';
+        if (item.isImage && item.previewUrl) {
+          thumb.innerHTML = `
+            <img src="${item.previewUrl}" alt="${escapeHtml(item.name)}" />
+            <button class="remove-attach" title="Remove">×</button>
+          `;
+        } else {
+          const icon = item.isVideo
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
+          thumb.innerHTML = `
+            <div class="file-icon">${icon}<span>${escapeHtml(item.name.slice(0, 12))}</span></div>
+            <button class="remove-attach" title="Remove">×</button>
+          `;
+        }
+        thumb.querySelector('.remove-attach').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removePendingFile(i);
+        });
+        attachPreview.appendChild(thumb);
+      });
     }
 
     function startNewChat() {
@@ -1220,20 +1448,23 @@
       messagesEl.appendChild(welcomeEl);
       welcomeEl.style.display = 'flex';
       userInput.value = '';
+      clearPendingFiles();
       autoResizeTextarea();
-      sendBtn.disabled = true;
+      updateSendButton();
       closeSidebar();
       renderHistory();
       userInput.focus();
     }
 
     function clearConversation() {
-      if (messages.length === 0) return;
-      if (!confirm('Clear this conversation?')) return;
+      if (messages.length === 0 && pendingFiles.length === 0) return;
+      if (messages.length > 0 && !confirm('Clear this conversation?')) return;
       messages = [];
+      clearPendingFiles();
       messagesEl.innerHTML = '';
       messagesEl.appendChild(welcomeEl);
       welcomeEl.style.display = 'flex';
+      updateSendButton();
       showToast('Conversation cleared');
     }
 
@@ -1313,17 +1544,40 @@
       scrollToBottom();
     }
 
-    function appendMessage(role, content, animate = true) {
+    function appendMessage(role, content, animate = true, mediaItems = null) {
       welcomeEl.style.display = 'none';
       const div = document.createElement('div');
       div.className = `message ${role}`;
       if (!animate) div.style.animation = 'none';
 
       const avatarLetter = role === 'user' ? 'U' : 'A';
+      let mediaHtml = '';
+      if (mediaItems && mediaItems.length > 0) {
+        mediaHtml = '<div class="message-media">';
+        mediaItems.forEach(m => {
+          if (m.isImage && m.previewUrl) {
+            mediaHtml += `<img src="${m.previewUrl}" alt="${escapeHtml(m.name || 'image')}" />`;
+          } else {
+            mediaHtml += `<div class="file-chip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+              <span>${escapeHtml(m.name || 'file')}</span>
+            </div>`;
+          }
+        });
+        mediaHtml += '</div>';
+      }
+
+      const textContent = content
+        ? (role === 'assistant' ? formatMarkdown(content) : escapeHtml(content))
+        : '';
+
       div.innerHTML = `
         <div class="message-avatar">${avatarLetter}</div>
         <div class="message-content">
-          <div class="message-bubble">${role === 'assistant' ? formatMarkdown(content) : escapeHtml(content)}</div>
+          <div class="message-bubble">
+            ${mediaHtml}
+            ${textContent}
+          </div>
           ${role === 'assistant' ? `
             <div class="message-actions">
               <button class="action-btn" title="Copy" onclick="copyText(this)">
@@ -1415,43 +1669,66 @@
 
     async function sendMessage() {
       const text = userInput.value.trim();
-      if (!text || isGenerating) return;
+      const filesSnapshot = [...pendingFiles];
+      if ((!text && filesSnapshot.length === 0) || isGenerating) return;
 
       isGenerating = true;
       sendBtn.disabled = true;
       sendBtn.classList.add('loading');
       sendBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
 
+      // Snapshot media for display (keep object URLs alive for this message)
+      const mediaForDisplay = filesSnapshot.map(f => ({
+        previewUrl: f.previewUrl,
+        isImage: f.isImage,
+        isVideo: f.isVideo,
+        name: f.name
+      }));
+
+      const promptText = text || (filesSnapshot.length > 0 ? 'Please analyze the attached file(s).' : '');
+
       // Add user message
-      messages.push({ role: 'user', content: text });
-      appendMessage('user', text);
+      messages.push({
+        role: 'user',
+        content: promptText,
+        hasMedia: filesSnapshot.length > 0
+      });
+      appendMessage('user', promptText, true, mediaForDisplay);
+
       userInput.value = '';
+      clearPendingFiles();
       autoResizeTextarea();
 
       // Typing indicator
       appendTyping();
 
       try {
-        // Build conversation history for context
-        const chatMessages = messages.map(m => ({
-          role: m.role,
-          content: m.content
-        }));
-
-        // Use Puter AI with the selected model
-        // Puter supports both string prompt and messages array depending on version
         let response;
-        try {
-          // Prefer messages array for multi-turn
-          response = await puter.ai.chat(chatMessages, {
-            model: currentModel,
-            stream: false
-          });
-        } catch (e) {
-          // Fallback to single prompt if messages array fails
-          response = await puter.ai.chat(text, {
+        const mediaFiles = filesSnapshot.map(f => f.file);
+
+        if (mediaFiles.length > 0) {
+          // Puter: puter.ai.chat(prompt, media | mediaArray, options)
+          // media can be File, URL string, or array of them
+          const mediaArg = mediaFiles.length === 1 ? mediaFiles[0] : mediaFiles;
+          response = await puter.ai.chat(promptText, mediaArg, {
             model: currentModel
           });
+        } else {
+          // Text-only multi-turn
+          const chatMessages = messages.map(m => ({
+            role: m.role,
+            content: m.content
+          }));
+          try {
+            response = await puter.ai.chat(chatMessages, {
+              model: currentModel,
+              stream: false
+            });
+          } catch (e) {
+            response = await puter.ai.chat(promptText, {
+              model: currentModel
+            });
+          }
         }
 
         removeTyping();
@@ -1486,7 +1763,7 @@
         isGenerating = false;
         sendBtn.classList.remove('loading');
         sendBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>`;
-        sendBtn.disabled = !userInput.value.trim();
+        updateSendButton();
         userInput.focus();
       }
     }
